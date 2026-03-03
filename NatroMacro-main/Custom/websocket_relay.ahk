@@ -20,6 +20,9 @@ global AltMyMainVIP
 global AltMyIdleVIP
 global AltClientName
 global BridgeRunning     := false
+global RelayServerPID := 0
+global RelayBridgePID := 0
+
 
 ; ===== CONFIG GLOBALS =====
 global CFG_ServerIP         := "127.0.0.1"
@@ -142,6 +145,8 @@ WSInbox  := parentDir "\BSSRelay\inbox.txt"
     if InStr(FileRead(A_Temp "\nodechk.txt"), "node.exe")
         BridgeRunning := true
 }
+
+
 }
 
 SaveConfig() {
@@ -389,16 +394,28 @@ RelaySaveClientName(*) {
     RelayLog("[RELAY] Client name set to: " AltClientName " | Role: " AltMyRole)
 }
 RelayStartHost(*) {
-    global MainGui
+    global MainGui, RelayServerPID, RelayBridgePID
+    SplitPath(A_WorkingDir, , &parentDir)
+    bssRelayPath := parentDir "\BSSRelay"
+
+    ; Check if already running
+    if (RelayServerPID && ProcessExist(RelayServerPID)) {
+        MsgBox("Relay is already running!`n`nClick Stop Relay first.", "BSS Relay", 0x40)
+        return
+    }
+
     try {
-        Run("node server.js", A_WorkingDir "\..\BSSRelay", "Hide")
+        if !FileExist(bssRelayPath "\server.js") {
+            MsgBox("server.js not found at:`n" bssRelayPath, "Relay Error", 0x10)
+            return
+        }
+        Run("node server.js", bssRelayPath, "Hide", &RelayServerPID)
         Sleep 2000
-        Run("node bridge.js", A_WorkingDir "\..\BSSRelay", "Hide")
+        Run("node bridge.js", bssRelayPath, "Hide", &RelayBridgePID)
         Sleep 1000
-        MainGui["RelayStatusSmall"].Value   := "● Online"
-        MainGui["RelayModeSmall"].Value     := "Host"
-        MainGui["RelayServerStatus"].Value  := "Running"
-        MainGui["RelayBridgeStatus"].Value  := "Running"
+        MainGui["RelayStatusSmall"].Value  := "● Online"
+        MainGui["RelayServerStatus"].Value := "Running"
+        MainGui["RelayBridgeStatus"].Value := "Running"
         RelayLog("[RELAY] Started as HOST")
     } catch as e {
         MainGui["RelayStatusSmall"].Value := "● Failed"
@@ -407,14 +424,24 @@ RelayStartHost(*) {
 }
 
 RelayStartClient(*) {
-    global MainGui
+    global MainGui, BridgeRunning, RelayBridgePID
+    SplitPath(A_WorkingDir, , &parentDir)
+    bssRelayPath := parentDir "\BSSRelay"
+
+    ; Check if already running
+    if (RelayBridgePID && ProcessExist(RelayBridgePID)) {
+        MsgBox("Bridge is already running!", "BSS Relay", 0x40)
+        return
+    }
+
     try {
-        if !FileExist(A_WorkingDir "\..\BSSRelay\bridge.js") {
-            MsgBox("bridge.js not found!`n`nExpected at:`n" A_WorkingDir "\..\BSSRelay\bridge.js`n`nMake sure the BSSRelay folder is in the right place.", "Relay Error", 0x10)
+        if !FileExist(bssRelayPath "\bridge.js") {
+            MsgBox("bridge.js not found at:`n" bssRelayPath, "Relay Error", 0x10)
             return
         }
-        Run("node bridge.js", A_WorkingDir "\..\BSSRelay", "Hide")
+        Run("node bridge.js", bssRelayPath, "Hide", &RelayBridgePID)
         Sleep 1000
+        BridgeRunning := true
         MainGui["RelayBridgeRunning"].Value := "● Running"
         RelayLog("[RELAY] Started as CLIENT")
     } catch as e {
@@ -424,16 +451,22 @@ RelayStartClient(*) {
 }
 
 RelayStop(*) {
-    global MainGui, WSRegistered, WSConnected, BridgeRunning
+    global MainGui, WSRegistered, WSConnected, BridgeRunning, RelayServerPID, RelayBridgePID
     try {
-        Run("taskkill /f /im node.exe", , "Hide")
-        try MainGui["RelayStatusSmall"].Value    := "● Offline"
-        try MainGui["RelayServerStatus"].Value   := "Not running"
-        try MainGui["RelayBridgeStatus"].Value   := "Not running"
-        try MainGui["RelayConnected"].Value      := "No"
-        try MainGui["RelayBridgeRunning"].Value  := "● Not running"
+        if (RelayServerPID) {
+            ProcessClose(RelayServerPID)
+            RelayServerPID := 0
+        }
+        if (RelayBridgePID) {
+            ProcessClose(RelayBridgePID)
+            RelayBridgePID := 0
+        }
+        try MainGui["RelayStatusSmall"].Value     := "● Offline"
+        try MainGui["RelayServerStatus"].Value    := "Not running"
+        try MainGui["RelayBridgeStatus"].Value    := "Not running"
+        try MainGui["RelayConnected"].Value       := "No"
+        try MainGui["RelayBridgeRunning"].Value   := "● Not running"
         try MainGui["RelayClientConnected"].Value := "No"
-        try MainGui["RelayModeSmall"].Value      := "Not started"
         WSRegistered  := false
         WSConnected   := false
         BridgeRunning := false
@@ -754,7 +787,52 @@ RMDeleteClient(index, *) {
 
 ; ===== CONNECT =====
 
+RMConnect(*) {
+    global RelayGui, WSHost, WSPort, WSRegistered, WSInbox, WSOutbox, WSConnecting, WSConnected, AltClientName
+MsgBox("WSOutbox: " WSOutbox "`nExists: " FileExist(WSOutbox))
+    if (WSConnected) {
+        MsgBox("Already connected to relay!", "BSS Relay", 0x40)
+        return
+    }
 
+    WSConnecting := true
+    WSHost := RelayGui["RMServerIP"].Value
+    WSPort := RelayGui["RMPort"].Value
+
+    RelayGui["RMStatusPill"].Value := "● CONNECTING..."
+    RelayGui["RMStatusPill"].SetFont("c00D4FF")
+
+    WSWrite("REGISTER|" AltClientName "|unknown")
+
+    startTime := A_TickCount
+    while (A_TickCount - startTime < 5000) {
+        try {
+            content := FileRead(WSInbox)
+            if (InStr(content, "ACK")) {
+                WSConnecting := false
+                WSConnected  := true
+                try FileDelete(WSInbox)
+                WSRegistered := true
+                RelayGui["RMStatusPill"].Value := "● CONNECTED"
+                RelayGui["RMStatusPill"].SetFont("c00FF88")
+                RMAppendLog("[WS] Connected as Main")
+                try MainGui["RelayConnected"].Value := "Yes - Main"
+                WinActivate("BSS Relay Manager")
+                return
+            }
+        }
+        Sleep 200
+    }
+
+    WSConnecting := false
+    WSRegistered := false
+    WSConnected  := false
+    RelayGui["RMStatusPill"].Value := "● FAILED"
+    RelayGui["RMStatusPill"].SetFont("cFF4444")
+    RMAppendLog("[WS] Connection failed - no ACK", "error")
+    MsgBox("Connection failed!`n`nMake sure:`n1. server.js is running`n2. bridge.js is running`n3. IP is " WSHost "`n4. Port is " WSPort, "BSS Relay - Failed", 0x10)
+    WinActivate("BSS Relay Manager")
+}
 
 RelayClientConnect(*) {
     global WSConnected, WSConnecting, WSInbox, WSOutbox, AltClientName, MainGui, BridgeRunning

@@ -5,8 +5,8 @@ const path = require('path');
 // ===== CONFIG =====
 const SERVER_IP = '127.0.0.1';  // Change if server is on different PC
 const PORT = 8080;
-const OUTBOX = 'C:\\Users\\Najalt\\Vs-code\\BssMacroProject\\BSSRelay\\outbox.txt';
-const INBOX  = 'C:\\Users\\Najalt\\Vs-code\\BssMacroProject\\BSSRelay\\inbox.txt';
+const OUTBOX = path.join(__dirname, 'outbox.txt');
+const INBOX  = path.join(__dirname, 'inbox.txt');
 
 // ===== SETUP FILES =====
 if (!fs.existsSync(OUTBOX)) fs.writeFileSync(OUTBOX, '');
