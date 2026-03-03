@@ -1,0 +1,41 @@
+# Git ignore (https://git-scm.com/docs/gitignore)
+######## START NATRO ########
+
+# Settings
+settings/*
+
+# Debug output
+MMScreenshots/*
+
+######## NartoTeam/NatroMacro EXCLUSIVE ########
+
+# github scripts
+.github/*
+.gitattributes
+
+# Dev Tools
+tools/*
+
+######## END NATRO ########
+
+# IDEs & Text Editors
+.idea
+.sublime-*
+.vscode
+.netbeans
+nbproject
+
+# Temporary files
+.tmp
+.temp
+*.temp.*
+.grunt
+.lock-wscript
+*-monitor-layout.txt
+
+# Logs
+/logs
+*.log
+
+# Dependencies
+node_modules
